@@ -1,12 +1,12 @@
 package com.webcrawler.http;
 
+import java.io.IOException;
+import java.util.Optional;
+
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
-import java.util.Optional;
 
 /**
  * Fetches a single URL and returns its parsed HTML document.
@@ -36,6 +36,13 @@ public class PageFetcher {
     /**
      * Fetches the URL and returns its parsed HTML.
      * Returns Optional.empty() if the fetch fails for any reason.
+     * With traditional threads:
+     * Each blocking network call consumes an OS thread -> limited to hundreds or a few thousand threads.
+     * You need CompletableFuture or NIO-based async to scale.
+     * With virtual threads:
+     * Each blocking call doesn’t consume OS threads.
+     * Existing queue + worker + virtual thread pool design is scalable.
+     * Adding CompletableFuture wrapping around Jsoup won’t improve throughput — just adds complexity.
      */
     public Optional<Document> fetch(String url) {
         try {
@@ -43,6 +50,7 @@ public class PageFetcher {
                     .userAgent(USER_AGENT)
                     .timeout(TIMEOUT_MS)
                     .get();
+                    
             logger.info("Fetched: {}", url);
             return Optional.of(doc);
         } catch (IOException e) {

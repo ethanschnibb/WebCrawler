@@ -30,6 +30,8 @@ public class Crawler {
     // Virtual threads are cheap but we still want to be polite to the server —
     // 20 concurrent requests is aggressive enough to be fast without hammering it.
     private static final int CONCURRENCY = 100;
+    public static final int MAX_RETRIES = 3;           // Maximum fetch retries per URL
+    private static final long RETRY_BACKOFF_MS = 1000; // Wait 1 second between retries
 
     private final PageFetcher fetcher;
     private final LinkExtractor extractor;
@@ -132,22 +134,42 @@ public class Crawler {
         }
     }
 
+    /**
+     * Process URL with retries
+     */
     private void processUrl(String url, String allowedHost, BlockingQueue<String> queue) {
         logger.debug("Fetching: {}", url);
+        int attempt = 0;
 
-        Optional<Document> doc = fetcher.fetch(url);
-        if (doc.isEmpty()) {
-            return; // fetch() already logged the reason
+        while (attempt < MAX_RETRIES) {
+            attempt++;
+            Optional<Document> doc = fetcher.fetch(url); // synchronous fetch is fine with virtual threads
+
+            if (doc.isPresent()) {
+                processDocument(url, doc.get(), allowedHost, queue);
+                return; // success, exit retry loop
+            } else {
+                logger.warn("Retry {}/{} for {}", attempt, MAX_RETRIES, url);
+                try {
+                    Thread.sleep(RETRY_BACKOFF_MS); // backoff between retries
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
         }
+        logger.error("Failed to fetch {} after {} retries", url, MAX_RETRIES);
+    }
 
-        List<String> links = extractor.extract(doc.get(), allowedHost);
+    /**
+     * Actual document processing
+     */
+    private void processDocument(String url, Document doc, String allowedHost, BlockingQueue<String> queue) {
+        List<String> links = extractor.extract(doc, allowedHost);
         printResult(url, links);
 
         for (String link : links) {
             String normalised = UrlNormaliser.normalise(link);
-            // visitedUrls.add() is atomic — returns false if already present.
-            // This is the correct way to do check-then-act under concurrency;
-            // a separate contains() + add() would have a race condition.
             if (visitedUrls.add(normalised)) {
                 try {
                     queue.put(normalised);

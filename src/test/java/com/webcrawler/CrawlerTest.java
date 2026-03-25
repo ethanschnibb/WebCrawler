@@ -1,20 +1,24 @@
 package com.webcrawler;
 
-import com.webcrawler.http.PageFetcher;
-import com.webcrawler.parser.LinkExtractor;
+import java.util.Optional;
+
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import static org.mockito.ArgumentMatchers.any;
 import org.mockito.Mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.Optional;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import com.webcrawler.http.PageFetcher;
+import com.webcrawler.parser.LinkExtractor;
 
 @ExtendWith(MockitoExtension.class)
 class CrawlerTest {
@@ -82,7 +86,7 @@ class CrawlerTest {
         when(fetcher.fetch(good)).thenReturn(Optional.of(html(good)));
         crawler.crawl(start);
         verify(fetcher).fetch(start);
-        verify(fetcher).fetch(broken);
+        verify(fetcher, times(Crawler.MAX_RETRIES)).fetch(broken);
         verify(fetcher).fetch(good);
     }
 
