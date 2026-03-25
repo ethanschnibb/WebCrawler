@@ -2,12 +2,16 @@ package com.webcrawler;
 
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
-import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.jsoup.nodes.Document;
 import org.slf4j.Logger;
@@ -18,38 +22,18 @@ import com.webcrawler.parser.LinkExtractor;
 import com.webcrawler.util.UrlNormaliser;
 import com.webcrawler.util.UrlValidator;
 
-/**
- * Orchestrates the crawl: maintains the queue of URLs to visit, tracks
- * which URLs have already been seen, and prints results.
- *
- * Changes from the original App class:
- *
- * - No longer static. visitedUrls is an instance field so each Crawler
- *   instance starts with a clean slate. The original static field meant
- *   two crawls in the same JVM would share visited state.
- *
- * - Iterative BFS replaces recursion. An explicit Queue makes the
- *   work-list visible and avoids stack overflow on deep sites. It also
- *   makes adding a thread pool later a straightforward change.
- *
- * - Depth tracking removed. The visited set already prevents infinite
- *   loops — MAX_DEPTH was only needed to stop the recursion running
- *   forever, which the visited set handles cleanly.
- *
- * - PageFetcher and LinkExtractor are injected so tests can supply fakes
- *   without making real network calls.
- *
- * - ConcurrentHashMap.newKeySet() instead of HashSet. Costs nothing now
- *   and makes adding a thread pool later safe without changing this line.
- */
 public class Crawler {
 
     private static final Logger logger = LoggerFactory.getLogger(Crawler.class);
 
+    // How many URLs to process concurrently.
+    // Virtual threads are cheap but we still want to be polite to the server —
+    // 20 concurrent requests is aggressive enough to be fast without hammering it.
+    private static final int CONCURRENCY = 100;
+
     private final PageFetcher fetcher;
     private final LinkExtractor extractor;
 
-    // Fresh per Crawler instance — no shared static state
     private final Set<String> visitedUrls = ConcurrentHashMap.newKeySet();
 
     public Crawler(PageFetcher fetcher, LinkExtractor extractor) {
@@ -57,17 +41,9 @@ public class Crawler {
         this.extractor = extractor;
     }
 
-    /**
-     * Starts a crawl from startUrl. The allowed host is derived from the
-     * start URL so the same Crawler works for any target site.
-     */
     public void crawl(String startUrl) {
-        // Check if url syntatically valid
-        // isValid() checks for valid scheme (protocol) like http/https - doesn't check if if URL is reachable
-        // Also checks if valid authority (hostname and IP address match normal format)
         if (!UrlValidator.isValid(startUrl)) {
             logger.error("Invalid start URL: {}", startUrl);
-            System.err.println("Invalid start URL: " + startUrl);
             return;
         }
 
@@ -77,56 +53,124 @@ public class Crawler {
             return;
         }
 
-        logger.info("Starting crawl of {} (allowed host: {})", startUrl, allowedHost);
+        String normalisedStart = UrlNormaliser.normalise(startUrl);
+        logger.info("Starting crawl of {} (allowed host: {})", normalisedStart, allowedHost);
 
-        Queue<String> queue = new LinkedList<>();
-        String normalisedStartUrl = UrlNormaliser.normalise(startUrl);
-        queue.add(normalisedStartUrl);
-        visitedUrls.add(normalisedStartUrl);
+        // BlockingQueue + AtomicInteger is the correct termination pattern for
+        // concurrent BFS. See comment on runWorker() for why.
+        BlockingQueue<String> queue = new LinkedBlockingQueue<>();
+        AtomicInteger activeWorkers = new AtomicInteger(0);
 
-        while (!queue.isEmpty()) {
-            String url = queue.poll();
-            logger.info("Crawling: {}", url);
+        queue.add(normalisedStart);
+        visitedUrls.add(normalisedStart);
 
-            Optional<Document> doc = fetcher.fetch(url);
-            if (doc.isEmpty()) {
-                // fetch() already logged the reason — nothing more to do here
-                continue;
-            }
+        // newVirtualThreadPerTaskExecutor: each submitted task gets its own virtual
+        // thread. Virtual threads are cheap (~few KB vs ~1MB for platform threads)
+        // and yield automatically when blocked on I/O — exactly what fetch() does.
+        // We submit exactly CONCURRENCY workers to cap concurrent requests.
+        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+        for (int i = 0; i < CONCURRENCY; i++) {
+            executor.submit(() -> runWorker(queue, activeWorkers, allowedHost));
+        }
 
-            List<String> links = extractor.extract(doc.get(), allowedHost);
-            printResult(url, links);
-
-            for (String link : links) {
-                String normalisedLink = UrlNormaliser.normalise(link);
-                // add() returns false if already present — atomic check-and-add
-                if (visitedUrls.add(normalisedLink)) {
-                    queue.add(normalisedLink);
-                }
-            }
+        executor.shutdown();
+        try {
+            executor.awaitTermination(10, TimeUnit.MINUTES);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logger.warn("Crawl interrupted");
         }
 
         logger.info("Crawl complete. Visited {} pages.", visitedUrls.size());
     }
 
     /**
-     * Prints the visited URL and the links found on that page to stdout.
-     * Kept as a separate method so the output format is easy to change later.
+     * Each worker runs this loop independently on its own virtual thread.
+     *
+     * Termination condition: the queue being empty is NOT enough to stop —
+     * another worker might be mid-fetch and about to produce new URLs.
+     * We use activeWorkers to count threads currently processing a URL
+     * (not just waiting). A worker exits only when BOTH are true:
+     *   - the queue is empty (poll timed out)
+     *   - no other worker is actively processing a URL
+     *
+     * poll(timeout) rather than take() lets us re-check this condition
+     * regularly without blocking forever.
      */
-    private void printResult(String url, List<String> links) {
-        System.out.println("\nVisited: " + url);
-        if (links.isEmpty()) {
-            System.out.println("  No same-domain links found.");
-        } else {
-            System.out.println("  Links found (" + links.size() + "):");
-            links.forEach(link -> System.out.println("    -> " + link));
+    private void runWorker(
+            BlockingQueue<String> queue,
+            AtomicInteger activeWorkers,
+            String allowedHost) {
+
+        while (true) {
+            String url;
+            try {
+                url = queue.poll(200, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+
+            if (url == null) {
+                // Queue was empty for our entire poll window.
+                // If no other thread is active, we're done.
+                if (activeWorkers.get() == 0) {
+                    return;
+                }
+                // Another thread is still working and may add URLs — keep polling.
+                continue;
+            }
+
+            activeWorkers.incrementAndGet();
+            try {
+                processUrl(url, allowedHost, queue);
+            } finally {
+                // Must be in finally — if processUrl throws, we still need to
+                // decrement so other workers can detect termination correctly.
+                activeWorkers.decrementAndGet();
+            }
         }
     }
 
-    /**
-     * Extracts the host from a URL string, or null if unparseable.
-     * Package-private for testing.
-     */
+    private void processUrl(String url, String allowedHost, BlockingQueue<String> queue) {
+        logger.debug("Fetching: {}", url);
+
+        Optional<Document> doc = fetcher.fetch(url);
+        if (doc.isEmpty()) {
+            return; // fetch() already logged the reason
+        }
+
+        List<String> links = extractor.extract(doc.get(), allowedHost);
+        printResult(url, links);
+
+        for (String link : links) {
+            String normalised = UrlNormaliser.normalise(link);
+            // visitedUrls.add() is atomic — returns false if already present.
+            // This is the correct way to do check-then-act under concurrency;
+            // a separate contains() + add() would have a race condition.
+            if (visitedUrls.add(normalised)) {
+                try {
+                    queue.put(normalised);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }
+    }
+
+    private void printResult(String url, List<String> links) {
+        // synchronized so concurrent workers don't interleave their output
+        synchronized (this) {
+            System.out.println("\nVisited: " + url);
+            if (links.isEmpty()) {
+                System.out.println("  No same-domain links found.");
+            } else {
+                System.out.printf("  Links found (%d):%n", links.size());
+                links.forEach(link -> System.out.println("    -> " + link));
+            }
+        }
+    }
+
     static String extractHost(String url) {
         try {
             return new URI(url).getHost();
