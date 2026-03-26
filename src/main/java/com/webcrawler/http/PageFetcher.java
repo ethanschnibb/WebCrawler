@@ -32,6 +32,8 @@ public class PageFetcher {
 
     private static final String USER_AGENT = "MonzoCrawler/1.0";
     private static final int TIMEOUT_MS = 10_000;
+    private static final int MAX_RETRIES = 3;
+    private static final long RETRY_BACKOFF_MS = 1_000;
 
     /**
      * Fetches the URL and returns its parsed HTML.
@@ -42,20 +44,35 @@ public class PageFetcher {
      * With virtual threads:
      * Each blocking call doesn’t consume OS threads.
      * Existing queue + worker + virtual thread pool design is scalable.
-     * Adding CompletableFuture wrapping around Jsoup won’t improve throughput — just adds complexity.
+     * Adding CompletableFuture wrapping around Jsoup is possible but unnecessary complexity for no real benefit.
      */
     public Optional<Document> fetch(String url) {
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                Document doc = Jsoup.connect(url)
+                        .userAgent(USER_AGENT)
+                        .timeout(TIMEOUT_MS)
+                        .get();
+                return Optional.of(doc);
+            } catch (IOException e) {
+                logger.warn("Attempt {}/{} failed for {}: {}", attempt, MAX_RETRIES, url, e.getMessage());
+                if (attempt < MAX_RETRIES) {
+                    // Exponential backoff before retrying
+                    // Rather than all threads retrying at the same time, we stagger them to reduce load on the server and increase chances of success on retry.
+                    long backoffMs = RETRY_BACKOFF_MS * (1L << (attempt - 1));
+                    logger.debug("Backing off {}ms before retry", backoffMs);
+                    sleep(backoffMs);
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static void sleep(long ms) {
         try {
-            Document doc = Jsoup.connect(url)
-                    .userAgent(USER_AGENT)
-                    .timeout(TIMEOUT_MS)
-                    .get();
-                    
-            logger.info("Fetched: {}", url);
-            return Optional.of(doc);
-        } catch (IOException e) {
-            logger.warn("Failed to fetch {}: {}", url, e.getMessage());
-            return Optional.empty();
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 }

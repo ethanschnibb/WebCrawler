@@ -28,7 +28,7 @@ public class Crawler {
 
     // How many URLs to process concurrently.
     // Virtual threads are cheap but we still want to be polite to the server —
-    // 20 concurrent requests is aggressive enough to be fast without hammering it.
+    // 100 concurrent requests is aggressive enough to be fast
     private static final int CONCURRENCY = 100;
     public static final int MAX_RETRIES = 3;           // Maximum fetch retries per URL
     private static final long RETRY_BACKOFF_MS = 1000; // Wait 1 second between retries
@@ -75,11 +75,18 @@ public class Crawler {
             executor.submit(() -> runWorker(queue, activeWorkers, allowedHost));
         }
 
+        // no new tasks accepted - already submitted tasks will keep running until they hit the termination condition in runWorker()
         executor.shutdown();
+
         try {
-            executor.awaitTermination(10, TimeUnit.MINUTES);
+            if (!executor.awaitTermination(10, TimeUnit.MINUTES)) {
+                executor.shutdownNow();
+            }
         } catch (InterruptedException e) {
+            executor.shutdownNow();
+            // Interrupt signals to thread to stop what its doing
             Thread.currentThread().interrupt();
+            
             logger.warn("Crawl interrupted");
         }
 
@@ -125,6 +132,7 @@ public class Crawler {
 
             activeWorkers.incrementAndGet();
             try {
+                // Do I need to wrap in catch to ensure decrement happens? Yes — if processUrl throws, we could leak an active worker and never terminate.
                 processUrl(url, allowedHost, queue);
             } finally {
                 // Must be in finally — if processUrl throws, we still need to
@@ -135,30 +143,18 @@ public class Crawler {
     }
 
     /**
-     * Process URL with retries
+     * Process URL
      */
     private void processUrl(String url, String allowedHost, BlockingQueue<String> queue) {
         logger.debug("Fetching: {}", url);
-        int attempt = 0;
 
-        while (attempt < MAX_RETRIES) {
-            attempt++;
-            Optional<Document> doc = fetcher.fetch(url); // synchronous fetch is fine with virtual threads
-
-            if (doc.isPresent()) {
-                processDocument(url, doc.get(), allowedHost, queue);
-                return; // success, exit retry loop
-            } else {
-                logger.warn("Retry {}/{} for {}", attempt, MAX_RETRIES, url);
-                try {
-                    Thread.sleep(RETRY_BACKOFF_MS); // backoff between retries
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-            }
+        Optional<Document> doc = fetcher.fetch(url); // retries handled inside fetcher
+        if (doc.isEmpty()) {
+            logger.error("Failed to fetch: {}", url);
+            return;
         }
-        logger.error("Failed to fetch {} after {} retries", url, MAX_RETRIES);
+
+        processDocument(url, doc.get(), allowedHost, queue);
     }
 
     /**
@@ -172,7 +168,9 @@ public class Crawler {
             String normalised = UrlNormaliser.normalise(link);
             if (visitedUrls.add(normalised)) {
                 try {
-                    queue.put(normalised);
+                    // blocking waits until queue has space (unlike add()) - provides backpressure
+                    // In future if queue is bounded then put is safer than add (LinkedBlockingQueue<>(1000))
+                    queue.put(normalised); 
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
