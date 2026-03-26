@@ -31,7 +31,6 @@ public class Crawler {
     // 100 concurrent requests is aggressive enough to be fast
     private static final int CONCURRENCY = 100;
     public static final int MAX_RETRIES = 3;           // Maximum fetch retries per URL
-    private static final long RETRY_BACKOFF_MS = 1000; // Wait 1 second between retries
 
     private final PageFetcher fetcher;
     private final LinkExtractor extractor;
@@ -80,6 +79,7 @@ public class Crawler {
 
         try {
             if (!executor.awaitTermination(10, TimeUnit.MINUTES)) {
+                logger.warn("Crawl timed out, forcing shutdown");
                 executor.shutdownNow();
             }
         } catch (InterruptedException e) {
@@ -122,13 +122,19 @@ public class Crawler {
 
             if (url == null) {
                 // Queue was empty for our entire poll window.
-                // If no other thread is active, we're done.
+                // If no more threads are active, can safely finish as no new URLs will be mid process
                 if (activeWorkers.get() == 0) {
                     return;
                 }
-                // Another thread is still working and may add URLs — keep polling.
+                // Otherwise another thread is still working and may add URLs so continue
                 continue;
             }
+
+            // Logic here if we want to cap max number of pages to crawl
+            // if (config.getMaxPages() > 0 && results.size() >= config.getMaxPages()) {
+            //     log.info("Reached maxPages limit ({}); stopping worker", config.getMaxPages());
+            //     return;
+            // }
 
             activeWorkers.incrementAndGet();
             try {
