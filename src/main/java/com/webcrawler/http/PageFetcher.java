@@ -26,11 +26,11 @@ import org.slf4j.LoggerFactory;
  * - Logs warn (not error) on failure. A failed fetch is recoverable —
  *   the crawler skips that URL and continues. Error overstates the severity.
  */
-public class PageFetcher {
+public class PageFetcher implements Fetcher {
 
     private static final Logger logger = LoggerFactory.getLogger(PageFetcher.class);
 
-    private static final String USER_AGENT = "MonzoCrawler/1.0";
+    private static final String USER_AGENT = "EthansCrawler/1.0"; // User-Agent string for politeness
     private static final int TIMEOUT_MS = 10_000;
     private static final int MAX_RETRIES = 3;
     private static final long RETRY_BACKOFF_MS = 1_000;
@@ -46,6 +46,7 @@ public class PageFetcher {
      * Existing queue + worker + virtual thread pool design is scalable.
      * Adding CompletableFuture wrapping around Jsoup is possible but unnecessary complexity for no real benefit.
      */
+    @Override
     public Optional<Document> fetch(String url) {
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
@@ -53,6 +54,8 @@ public class PageFetcher {
                         .userAgent(USER_AGENT)
                         .timeout(TIMEOUT_MS)
                         .get();
+
+                logger.info("Fetched: {}", url);
                 return Optional.of(doc);
             } catch (IOException e) {
                 logger.warn("Attempt {}/{} failed for {}: {}", attempt, MAX_RETRIES, url, e.getMessage());
@@ -66,6 +69,24 @@ public class PageFetcher {
             }
         }
         return Optional.empty();
+    }
+
+    @Override
+    public Optional<String> fetchText(String url) {
+        try {
+            String body = Jsoup.connect(url)
+                    .userAgent(USER_AGENT)
+                    .timeout(TIMEOUT_MS)
+                    .ignoreContentType(true)  // critical — robots.txt is text/plain not text/html
+                    .execute()
+                    .body();
+            logger.info("Fetched text resource: {}", url);
+            return Optional.of(body);
+        } catch (IOException e) {
+            // 404 is normal — many sites have no robots.txt
+            logger.info("Could not fetch {} ({}), will allow all paths", url, e.getMessage());
+            return Optional.empty();
+        }
     }
 
     private static void sleep(long ms) {

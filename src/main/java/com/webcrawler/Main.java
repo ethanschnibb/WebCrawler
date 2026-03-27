@@ -1,18 +1,22 @@
+
 package com.webcrawler;
 
 import com.webcrawler.http.PageFetcher;
 import com.webcrawler.parser.LinkExtractor;
 
-/**
- * Entry point. Responsible for exactly one thing: reading arguments and
- * wiring up the crawler. No crawl logic lives here.
- */
 public class Main {
 
     public static void main(String[] args) {
+        int exitCode = run(args);
+        if (exitCode != 0) {
+            System.exit(exitCode);
+        }
+    }
+
+    static int run(String[] args) {
         if (args.length < 1) {
             System.err.println("Usage: webcrawler <start-url>");
-            System.exit(1);
+            return 1;
         }
 
         String startUrl = args[0];
@@ -22,5 +26,7 @@ public class Main {
         Crawler crawler = new Crawler(fetcher, extractor);
 
         crawler.crawl(startUrl);
+
+        return 0;
     }
 }

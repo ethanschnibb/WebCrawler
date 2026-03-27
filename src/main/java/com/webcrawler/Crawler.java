@@ -18,6 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.webcrawler.http.PageFetcher;
+import com.webcrawler.http.PolitenessChecker;
 import com.webcrawler.parser.LinkExtractor;
 import com.webcrawler.util.UrlNormaliser;
 import com.webcrawler.util.UrlValidator;
@@ -31,6 +32,8 @@ public class Crawler {
     // 100 concurrent requests is aggressive enough to be fast
     private static final int CONCURRENCY = 100;
     public static final int MAX_RETRIES = 3;           // Maximum fetch retries per URL
+    private static final String USER_AGENT = "EthansCrawler/1.0"; // User-Agent string for politeness
+
 
     private final PageFetcher fetcher;
     private final LinkExtractor extractor;
@@ -57,8 +60,11 @@ public class Crawler {
         String normalisedStart = UrlNormaliser.normalise(startUrl);
         logger.info("Starting crawl of {} (allowed host: {})", normalisedStart, allowedHost);
 
+        // Read robots.txt and instantiate politeness rules
+        PolitenessChecker politenessChecker = new PolitenessChecker(normalisedStart, fetcher, USER_AGENT);
+
         // BlockingQueue + AtomicInteger is the correct termination pattern for
-        // concurrent BFS. See comment on runWorker() for why.
+        // concurrent BFS. See comment on crawl() for why.
         BlockingQueue<String> queue = new LinkedBlockingQueue<>();
         AtomicInteger activeWorkers = new AtomicInteger(0);
 
@@ -71,10 +77,10 @@ public class Crawler {
         // We submit exactly CONCURRENCY workers to cap concurrent requests.
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         for (int i = 0; i < CONCURRENCY; i++) {
-            executor.submit(() -> runWorker(queue, activeWorkers, allowedHost));
+            executor.submit(() -> crawl(queue, activeWorkers, allowedHost, politenessChecker));
         }
 
-        // no new tasks accepted - already submitted tasks will keep running until they hit the termination condition in runWorker()
+        // no new tasks accepted - already submitted tasks will keep running until they hit the termination condition in crawl()
         executor.shutdown();
 
         try {
@@ -106,10 +112,11 @@ public class Crawler {
      * poll(timeout) rather than take() lets us re-check this condition
      * regularly without blocking forever.
      */
-    private void runWorker(
+    private void crawl(
             BlockingQueue<String> queue,
             AtomicInteger activeWorkers,
-            String allowedHost) {
+            String allowedHost,
+            PolitenessChecker politenessChecker) {
 
         while (true) {
             String url;
@@ -139,7 +146,7 @@ public class Crawler {
             activeWorkers.incrementAndGet();
             try {
                 // Do I need to wrap in catch to ensure decrement happens? Yes — if processUrl throws, we could leak an active worker and never terminate.
-                processUrl(url, allowedHost, queue);
+                processUrl(url, allowedHost, queue, politenessChecker);
             } finally {
                 // Must be in finally — if processUrl throws, we still need to
                 // decrement so other workers can detect termination correctly.
@@ -151,8 +158,11 @@ public class Crawler {
     /**
      * Process URL
      */
-    private void processUrl(String url, String allowedHost, BlockingQueue<String> queue) {
-        logger.debug("Fetching: {}", url);
+    private void processUrl(String url, String allowedHost, BlockingQueue<String> queue, PolitenessChecker politenessChecker) {
+        if (!politenessChecker.isAllowed(url)) {
+            logger.info("Skipping disallowed URL: {}", url);
+            return;
+        }
 
         Optional<Document> doc = fetcher.fetch(url); // retries handled inside fetcher
         if (doc.isEmpty()) {
