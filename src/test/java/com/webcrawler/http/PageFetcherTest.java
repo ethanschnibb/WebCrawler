@@ -6,6 +6,7 @@ import static org.mockito.Mockito.*;
 import java.io.IOException;
 import java.util.Optional;
 
+import com.webcrawler.config.CrawlerConfig;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -14,26 +15,29 @@ import org.mockito.MockedStatic;
 
 class PageFetcherTest {
 
-    private final PageFetcher fetcher = new PageFetcher();
+    // Build a minimal config for tests — zero retry backoff so tests don't
+    // sleep for seconds waiting between retries
+    private final CrawlerConfig config = CrawlerConfig.builder()
+            .maxRetries(3)
+            .retryBackoffMs(0)   // no sleeping in tests
+            .timeoutMs(5_000)
+            .userAgent("TestCrawler/1.0")
+            .build();
+
+    private final PageFetcher fetcher = new PageFetcher(config);
 
     @Test
     void shouldFetchDocumentSuccessfully() throws Exception {
-
         Document mockDoc = mock(Document.class);
-
         Connection connection = mock(Connection.class);
 
         try (MockedStatic<Jsoup> jsoup = mockStatic(Jsoup.class)) {
-
-            jsoup.when(() -> Jsoup.connect("https://test.com"))
-                    .thenReturn(connection);
-
+            jsoup.when(() -> Jsoup.connect("https://test.com")).thenReturn(connection);
             when(connection.userAgent(anyString())).thenReturn(connection);
             when(connection.timeout(anyInt())).thenReturn(connection);
             when(connection.get()).thenReturn(mockDoc);
 
-            Optional<Document> result =
-                    fetcher.fetch("https://test.com");
+            Optional<Document> result = fetcher.fetch("https://test.com");
 
             assertTrue(result.isPresent());
             assertEquals(mockDoc, result.get());
@@ -42,123 +46,77 @@ class PageFetcherTest {
 
     @Test
     void shouldRetryThenSucceed() throws Exception {
-
         Document mockDoc = mock(Document.class);
-
         Connection connection = mock(Connection.class);
 
         try (MockedStatic<Jsoup> jsoup = mockStatic(Jsoup.class)) {
-
-            jsoup.when(() -> Jsoup.connect("https://retry.com"))
-                    .thenReturn(connection);
-
-            when(connection.userAgent(anyString()))
-                    .thenReturn(connection);
-
-            when(connection.timeout(anyInt()))
-                    .thenReturn(connection);
-
+            jsoup.when(() -> Jsoup.connect("https://retry.com")).thenReturn(connection);
+            when(connection.userAgent(anyString())).thenReturn(connection);
+            when(connection.timeout(anyInt())).thenReturn(connection);
             when(connection.get())
                     .thenThrow(new IOException("fail"))
                     .thenReturn(mockDoc);
 
-            Optional<Document> result =
-                    fetcher.fetch("https://retry.com");
+            Optional<Document> result = fetcher.fetch("https://retry.com");
 
             assertTrue(result.isPresent());
+            // Verify it actually retried — get() called twice
+            verify(connection, times(2)).get();
         }
     }
 
     @Test
     void shouldReturnEmptyAfterMaxRetries() throws Exception {
-
         Connection connection = mock(Connection.class);
 
         try (MockedStatic<Jsoup> jsoup = mockStatic(Jsoup.class)) {
+            jsoup.when(() -> Jsoup.connect("https://fail.com")).thenReturn(connection);
+            when(connection.userAgent(anyString())).thenReturn(connection);
+            when(connection.timeout(anyInt())).thenReturn(connection);
+            when(connection.get()).thenThrow(new IOException("always fails"));
 
-            jsoup.when(() -> Jsoup.connect("https://fail.com"))
-                    .thenReturn(connection);
-
-            when(connection.userAgent(anyString()))
-                    .thenReturn(connection);
-
-            when(connection.timeout(anyInt()))
-                    .thenReturn(connection);
-
-            when(connection.get())
-                    .thenThrow(new IOException("fail"));
-
-            Optional<Document> result =
-                    fetcher.fetch("https://fail.com");
+            Optional<Document> result = fetcher.fetch("https://fail.com");
 
             assertTrue(result.isEmpty());
+            // Verify it retried exactly maxRetries times
+            verify(connection, times(config.getMaxRetries())).get();
         }
     }
 
     @Test
     void shouldFetchTextSuccessfully() throws Exception {
-
         Connection connection = mock(Connection.class);
-
-        Connection.Response response =
-                mock(Connection.Response.class);
+        Connection.Response response = mock(Connection.Response.class);
 
         try (MockedStatic<Jsoup> jsoup = mockStatic(Jsoup.class)) {
+            jsoup.when(() -> Jsoup.connect("https://robots.com")).thenReturn(connection);
+            when(connection.userAgent(anyString())).thenReturn(connection);
+            when(connection.timeout(anyInt())).thenReturn(connection);
+            when(connection.ignoreContentType(true)).thenReturn(connection);
+            when(connection.execute()).thenReturn(response);
+            when(response.body()).thenReturn("User-agent: *");
 
-            jsoup.when(() -> Jsoup.connect("https://robots.com"))
-                    .thenReturn(connection);
-
-            when(connection.userAgent(anyString()))
-                    .thenReturn(connection);
-
-            when(connection.timeout(anyInt()))
-                    .thenReturn(connection);
-
-            when(connection.ignoreContentType(true))
-                    .thenReturn(connection);
-
-            when(connection.execute())
-                    .thenReturn(response);
-
-            when(response.body())
-                    .thenReturn("User-agent: *");
-
-            Optional<String> result =
-                    fetcher.fetchText("https://robots.com");
+            Optional<String> result = fetcher.fetchText("https://robots.com");
 
             assertTrue(result.isPresent());
-
             assertEquals("User-agent: *", result.get());
         }
     }
 
     @Test
     void shouldReturnEmptyIfFetchTextFails() throws Exception {
-
         Connection connection = mock(Connection.class);
 
         try (MockedStatic<Jsoup> jsoup = mockStatic(Jsoup.class)) {
+            jsoup.when(() -> Jsoup.connect("https://robots.com")).thenReturn(connection);
+            when(connection.userAgent(anyString())).thenReturn(connection);
+            when(connection.timeout(anyInt())).thenReturn(connection);
+            when(connection.ignoreContentType(true)).thenReturn(connection);
+            when(connection.execute()).thenThrow(new IOException("404"));
 
-            jsoup.when(() -> Jsoup.connect("https://robots.com"))
-                    .thenReturn(connection);
-
-            when(connection.userAgent(anyString()))
-                    .thenReturn(connection);
-
-            when(connection.timeout(anyInt()))
-                    .thenReturn(connection);
-
-            when(connection.ignoreContentType(true))
-                    .thenReturn(connection);
-
-            when(connection.execute())
-                    .thenThrow(new IOException("404"));
-
-            Optional<String> result =
-                    fetcher.fetchText("https://robots.com");
+            Optional<String> result = fetcher.fetchText("https://robots.com");
 
             assertTrue(result.isEmpty());
         }
     }
-
 }

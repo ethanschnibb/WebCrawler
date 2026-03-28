@@ -3,10 +3,10 @@ package com.webcrawler.http;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 import java.util.List;
+import java.util.Optional;
 
 class PolitenessCheckerTest {
 
-    // Use the test constructor that takes content directly — no HTTP needed
     private PolitenessChecker filter(String content) {
         return new PolitenessChecker(content, "MonzoCrawler/1.0");
     }
@@ -20,7 +20,7 @@ class PolitenessCheckerTest {
     void disallowsMatchingPath() {
         PolitenessChecker f = filter("User-agent: *\nDisallow: /admin\n");
         assertFalse(f.isAllowed("https://example.com/admin"));
-        assertFalse(f.isAllowed("https://example.com/admin/settings")); // prefix match
+        assertFalse(f.isAllowed("https://example.com/admin/settings"));
         assertTrue(f.isAllowed("https://example.com/about"));
     }
 
@@ -33,7 +33,6 @@ class PolitenessCheckerTest {
 
     @Test
     void emptyDisallowMeansAllowAll() {
-        // Empty Disallow: is a no-op — means allow everything
         PolitenessChecker f = filter("User-agent: *\nDisallow:\n");
         assertTrue(f.isAllowed("https://example.com/anything"));
     }
@@ -49,7 +48,7 @@ class PolitenessCheckerTest {
                 """;
         PolitenessChecker f = filter(content);
         assertFalse(f.isAllowed("https://example.com/specific-only"));
-        assertTrue(f.isAllowed("https://example.com/wildcard-only")); // wildcard ignored
+        assertTrue(f.isAllowed("https://example.com/wildcard-only"));
     }
 
     @Test
@@ -73,11 +72,6 @@ class PolitenessCheckerTest {
         assertTrue(f.isAllowed("https://example.com/public"));
     }
 
-    // @Test
-    // void isLoadedFalseWhenEmpty() {
-    //     assertFalse(filter("").isLoaded());
-    // }
-
     @Test
     void isLoadedTrueWhenContentPresent() {
         assertTrue(filter("User-agent: *\nDisallow: /admin\n").isLoaded());
@@ -89,5 +83,28 @@ class PolitenessCheckerTest {
         List<String> prefixes = f.getDisallowedPrefixes();
         assertTrue(prefixes.contains("/admin"));
         assertTrue(prefixes.contains("/private"));
+    }
+
+    @Test
+    void shouldSetLoadedFalseWhenRobotsUrlInvalid() {
+        // Use a Fetcher lambda instead of new PageFetcher() —
+        // no config needed, no real HTTP, directly tests the invalid-URL branch
+        Fetcher fakeFetcher = new Fetcher() {
+            @Override
+            public Optional<org.jsoup.nodes.Document> fetch(String url) {
+                return Optional.empty();
+            }
+            @Override
+            public Optional<String> fetchText(String url) {
+                return Optional.empty();
+            }
+        };
+
+        PolitenessChecker checker = new PolitenessChecker(
+                "ht!tp://bad url",
+                fakeFetcher,
+                "EthansCrawler/1.0"
+        );
+        assertFalse(checker.isLoaded());
     }
 }

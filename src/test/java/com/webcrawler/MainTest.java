@@ -33,7 +33,7 @@ class MainTest {
 
         assertEquals(1, result);
         assertEquals(
-            "Usage: webcrawler <start-url>\n",
+            "Usage: webcrawler <start-url> [maxPages] [maxDepth]\n",
             errContent.toString()
         );
     }

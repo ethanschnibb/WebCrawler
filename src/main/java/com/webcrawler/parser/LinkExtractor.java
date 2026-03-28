@@ -14,17 +14,16 @@ import com.webcrawler.util.UrlValidator;
 /**
  * Extracts same-domain links from a parsed HTML document.
  *
- * Changes from the original:
+ * Responsibilities:
+ * - Given a Document, returns a list of absolute URLs belonging to the allowed host.
+ * - Strips URL fragments so that /page#section and /page are considered the same resource.
+ * - Decoupled from crawling logic: does not handle visited sets, queues, or output.
  *
- * - Moved to its own class. Link extraction knows about HTML and jsoup
- *   but nothing about queues, visited sets, or output. You can test
- *   "does this HTML produce these links?" without running a crawl at all.
- *
- * - The allowed host is a parameter, not hardcoded. The same extractor
- *   works for any target site.
- *
- * - Fragment stripping. /page#section and /page are the same resource.
- *   The original would enqueue both and visit the page twice.
+ * Design decisions:
+ * - Allowed host is a parameter for flexibility; works with any domain.
+ * - Only anchors with href attributes are considered.
+ * - Skips invalid URLs or URLs outside the allowed host.
+ * - Logging at DEBUG level for skipped URLs to aid debugging without polluting normal logs.
  */
 public class LinkExtractor {
 
@@ -63,7 +62,9 @@ public class LinkExtractor {
 
         return links;
     }
-
+    /**
+     * Removes the fragment component of a URL (the part after #), if any.
+     */
     private static String stripFragment(String url) {
         int i = url.indexOf('#');
         return i >= 0 ? url.substring(0, i) : url;

@@ -11,16 +11,25 @@ import java.net.URISyntaxException;
  */
 public final class UrlNormaliser {
 
-    private UrlNormaliser() {}
+    private UrlNormaliser() {} // Prevent instantiation
 
     /**
+     * Normalises a URL according to common web crawling rules.
+     *
+     * @param url the URL string to normalise
+     * @return a canonicalised URL string
+     *
      * Rules applied:
-     * - Lowercase scheme and host: http://EXAMPLE.com/Page -> http://example.com/Page
-     * - Remove default ports (80 for http, 443 for https)
-     * - Collapse empty path to /: http://example.com -> http://example.com/
-     * - Remove trailing slash from non-root paths: http://example.com/page/ -> http://example.com/page
-     * - Strip empty query strings
-     * - Strip fragments (should already be gone, but just in case)
+     * 1. Lowercase scheme and host: http://EXAMPLE.com/Page -> http://example.com/Page
+     * 2. Remove default ports (80 for http, 443 for https)
+     * 3. Collapse empty path to root "/": http://example.com -> http://example.com/
+     * 4. Remove trailing slash for non-root paths: http://example.com/page/ -> http://example.com/page
+     * 5. Strip empty query strings
+     * 6. Strip fragment identifiers (should already be removed)
+     *
+     * Notes:
+     * - If URL parsing fails, returns the original URL; this avoids crashing the crawler.
+     * - Intended to be used after URL validation.
      */
     public static String normalise(String url) {
         try {
