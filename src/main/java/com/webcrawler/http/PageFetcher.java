@@ -73,7 +73,7 @@ public class PageFetcher implements Fetcher {
                 Document doc = Jsoup.connect(url)
                         .userAgent(config.getUserAgent())
                         .timeout(config.getTimeoutMs())
-                        .get();
+                        .get(); // should use execute so I can get status codes -> int statusCode = Jsoup.connect(url).execute().statusCode();
                 logger.info("Fetched: {}", url);
                 return Optional.of(doc);
 
