@@ -74,9 +74,23 @@ public class PageFetcher implements Fetcher {
                         .userAgent(config.getUserAgent())
                         .timeout(config.getTimeoutMs())
                         .get(); // should use execute so I can get status codes -> int statusCode = Jsoup.connect(url).execute().statusCode();
-                logger.info("Fetched: {}", url); // Potentially too much log noise here, but useful for debugging and monitoring crawl progress - could change to debug
+                // Connection.Response response = Jsoup.connect(url)
+                //         .userAgent(config.getUserAgent())
+                //         .timeout(config.getTimeoutMs())
+                //         .execute();
+                // int statusCode = response.statusCode();
+                logger.debug("Fetched: {}", url); // Potentially too much log noise here, but useful for debugging and monitoring crawl progress - could change to debug
+                
+                // if (statusCode >= 200 && statusCode < 300) {
+                //     Document doc = response.parse();
+                //     logger.info("Fetched page: {} (status: {})", url, statusCode);
+                //     return Optional.of(doc);
+                // } else {
+                //     logger.warn("Non-HTML response for {}: HTTP {}", url, statusCode);
+                //     return Optional.empty(); // Don't retry non-HTML responses
+                // }
                 return Optional.of(doc);
-
+                
             } catch (IOException e) {
                 logger.warn("Attempt {}/{} failed for {}: {}",
                         attempt, config.getMaxRetries(), url, e.getMessage());

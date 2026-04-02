@@ -37,6 +37,7 @@ public class Main {
         CrawlerConfig config = buildConfig(args);
 
         Fetcher fetcher     = new PageFetcher(config);
+        // Instantiate here and pass to crawler to not mix responsibilites + makes testing easier (can mock fetcher and extractor in crawler tests)
         LinkExtractor extractor = new LinkExtractor();
         Crawler crawler         = new Crawler(fetcher, extractor, config);
 
