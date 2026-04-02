@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.webcrawler.config.CrawlerConfig;
+import com.webcrawler.http.Fetcher;
 import com.webcrawler.http.PageFetcher;
 import com.webcrawler.parser.LinkExtractor;
 
@@ -35,7 +36,7 @@ public class Main {
 
         CrawlerConfig config = buildConfig(args);
 
-        PageFetcher fetcher     = new PageFetcher(config);
+        Fetcher fetcher     = new PageFetcher(config);
         LinkExtractor extractor = new LinkExtractor();
         Crawler crawler         = new Crawler(fetcher, extractor, config);
 
