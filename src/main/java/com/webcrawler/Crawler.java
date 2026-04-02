@@ -1,22 +1,28 @@
 package com.webcrawler;
 
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.jsoup.nodes.Document;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.webcrawler.config.CrawlerConfig;
 import com.webcrawler.http.Fetcher;
 import com.webcrawler.http.PolitenessChecker;
 import com.webcrawler.parser.LinkExtractor;
 import com.webcrawler.util.UrlNormaliser;
 import com.webcrawler.util.UrlValidator;
-import org.jsoup.nodes.Document;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Multi-threaded, same-domain web crawler.
@@ -230,6 +236,8 @@ public class Crawler {
      * Prints results of a crawl for a single page.
      * Synchronized to prevent jumbled output across threads.
      *
+     * Should be extracteed to ResultPrinter class as outputting is separate concern from crawling
+     * 
      * @param url The page URL
      * @param depth Depth of crawl for this page
      * @param links List of same-domain links discovered

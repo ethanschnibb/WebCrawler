@@ -6,7 +6,7 @@ A concurrent, single-domain web crawler written in Java 21.
 
 ```bash
 # Build
-mvn package -q
+mvn package --quiet
 
 # Run against the Monzo test site
 java -jar target/webcrawler-1.0.0-jar-with-dependencies.jar https://crawlme.monzo.com/
@@ -30,11 +30,11 @@ open target/site/jacoco/index.html
 webcrawler <start-url> [maxPages] [maxDepth]
 ```
 
-| Argument | Required | Default | Description |
-|---|---|---|---|
-| `start-url` | Yes | — | The URL to start crawling from. Determines the allowed host. |
-| `maxPages` | No | 0 (unlimited) | Stop after crawling this many pages |
-| `maxDepth` | No | 0 (unlimited) | Stop following links beyond this many hops from the start URL |
+| Argument    | Required | Default       | Description                                                   |
+| ----------- | -------- | ------------- | ------------------------------------------------------------- |
+| `start-url` | Yes      | —             | The URL to start crawling from. Determines the allowed host.  |
+| `maxPages`  | No       | 0 (unlimited) | Stop after crawling this many pages                           |
+| `maxDepth`  | No       | 0 (unlimited) | Stop following links beyond this many hops from the start URL |
 
 Output goes to **stdout**; logs go to **stderr** — redirect them independently:
 
@@ -125,6 +125,7 @@ Both pass a `contains` check but fail an exact host match. Only `crawlme.monzo.c
 `PolitenessChecker` is constructed once on the main thread before any workers start, then passed to each worker as a read-only reference — no synchronisation needed on `isAllowed()` calls.
 
 It implements the common subset of RFC 9309:
+
 - `User-agent` matching — specific agent name takes precedence over the `*` wildcard
 - `Disallow` prefix matching
 
@@ -180,15 +181,15 @@ Add JaCoCo to `pom.xml` if not already present:
 
 ### Testing strategy
 
-| Layer | Approach | Why |
-|---|---|---|
-| `UrlValidator` | Pure unit tests | No I/O — just URI parsing logic |
-| `UrlNormaliser` | Pure unit tests | No I/O — just string transformations |
-| `PolitenessChecker` | Unit tests with inline robots.txt strings | Test constructor bypasses HTTP entirely |
-| `LinkExtractor` | Unit tests with inline HTML strings | jsoup parses in-memory, no network needed |
-| `PageFetcher` | Mockito static mocks on `Jsoup` | Tests retry logic and backoff without real HTTP |
-| `Crawler` | Mockito mock of `Fetcher` interface | Tests queue logic, dedup, depth, page cap without any network |
-| `Main` | Unit tests on `run()` and `buildConfig()` | `run()` returns an int so tests avoid `System.exit()` |
+| Layer               | Approach                                  | Why                                                           |
+| ------------------- | ----------------------------------------- | ------------------------------------------------------------- |
+| `UrlValidator`      | Pure unit tests                           | No I/O — just URI parsing logic                               |
+| `UrlNormaliser`     | Pure unit tests                           | No I/O — just string transformations                          |
+| `PolitenessChecker` | Unit tests with inline robots.txt strings | Test constructor bypasses HTTP entirely                       |
+| `LinkExtractor`     | Unit tests with inline HTML strings       | jsoup parses in-memory, no network needed                     |
+| `PageFetcher`       | Mockito static mocks on `Jsoup`           | Tests retry logic and backoff without real HTTP               |
+| `Crawler`           | Mockito mock of `Fetcher` interface       | Tests queue logic, dedup, depth, page cap without any network |
+| `Main`              | Unit tests on `run()` and `buildConfig()` | `run()` returns an int so tests avoid `System.exit()`         |
 
 The `Fetcher` interface is to make testing easier. `Crawler` never imports `PageFetcher` — it only knows about `Fetcher`. Tests inject a Mockito mock or a simple lambda:
 

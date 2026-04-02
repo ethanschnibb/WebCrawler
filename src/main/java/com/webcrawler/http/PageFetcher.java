@@ -74,7 +74,7 @@ public class PageFetcher implements Fetcher {
                         .userAgent(config.getUserAgent())
                         .timeout(config.getTimeoutMs())
                         .get(); // should use execute so I can get status codes -> int statusCode = Jsoup.connect(url).execute().statusCode();
-                logger.info("Fetched: {}", url);
+                logger.info("Fetched: {}", url); // Potentially too much log noise here, but useful for debugging and monitoring crawl progress - could change to debug
                 return Optional.of(doc);
 
             } catch (IOException e) {

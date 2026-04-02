@@ -1,10 +1,15 @@
 package com.webcrawler;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.webcrawler.config.CrawlerConfig;
 import com.webcrawler.http.PageFetcher;
 import com.webcrawler.parser.LinkExtractor;
 
 public class Main {
+
+    private static final Logger logger = LoggerFactory.getLogger(Main.class);
 
     public static void main(String[] args) {
         int exitCode = run(args);
@@ -50,6 +55,7 @@ public class Main {
                 builder.maxPages(Integer.parseInt(args[1]));
             } catch (NumberFormatException e) {
                 System.err.println("Warning: invalid maxPages '" + args[1] + "', using unlimited");
+                logger.warn("Invalid max pages '{}', using unlimited", args[1]);
             }
         }
 
@@ -58,6 +64,7 @@ public class Main {
                 builder.maxDepth(Integer.parseInt(args[2]));
             } catch (NumberFormatException e) {
                 System.err.println("Warning: invalid maxDepth '" + args[2] + "', using unlimited");
+                logger.warn("Invalid max depth '{}', using unlimited", args[2]);
             }
         }
 
