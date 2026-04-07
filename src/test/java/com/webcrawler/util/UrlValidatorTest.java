@@ -1,6 +1,9 @@
 package com.webcrawler.util;
 
 import org.junit.jupiter.api.Test;
+
+import com.webcrawler.util.UrlValidator;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class UrlValidatorTest {
