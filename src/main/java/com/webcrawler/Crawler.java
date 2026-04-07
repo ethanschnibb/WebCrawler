@@ -10,6 +10,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -108,12 +109,20 @@ public class Crawler {
         BlockingQueue<UrlWithDepth> queue = new LinkedBlockingQueue<>();
         AtomicInteger activeWorkers = new AtomicInteger(0);
 
+        Semaphore pageSlots;
+        if (config.getMaxPages() > 0) {
+            pageSlots = new Semaphore(config.getMaxPages());
+        } else {
+            // If no max pages, use a semaphore with a large number of permits to avoid blocking
+            pageSlots = new Semaphore(Integer.MAX_VALUE);
+        }
+
         queue.add(new UrlWithDepth(normalisedStart, 0));
         visitedUrls.add(normalisedStart);
 
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         for (int i = 0; i < config.getConcurrency(); i++) {
-            executor.submit(() -> runWorker(queue, activeWorkers, allowedHost, politenessChecker));
+            executor.submit(() -> runWorker(queue, activeWorkers, allowedHost, politenessChecker, pageSlots));
         }
 
         executor.shutdown();
@@ -140,10 +149,11 @@ public class Crawler {
      * @param politenessChecker Enforces robots.txt rules
      */
     private void runWorker(
-            BlockingQueue<UrlWithDepth> queue,
-            AtomicInteger activeWorkers,
-            String allowedHost,
-            PolitenessChecker politenessChecker) {
+        BlockingQueue<UrlWithDepth> queue,
+        AtomicInteger activeWorkers,
+        String allowedHost,
+        PolitenessChecker politenessChecker,
+        Semaphore pageSlots) {
 
         while (true) {
             UrlWithDepth item;
@@ -154,23 +164,14 @@ public class Crawler {
                 return;
             }
 
-            // If queue is empty, check if other workers are still active
             if (item == null) {
-                if (activeWorkers.get() == 0) return;
+                if (activeWorkers.get() == 0 && queue.isEmpty()) return;
                 continue;
-            }
-
-            // Max pages check — stop this worker if the global page cap is reached.
-            // pageCount is checked BEFORE incrementing so we don't overshoot by
-            // the number of concurrent workers.
-            if (config.hasMaxPages() && pageCount.get() >= config.getMaxPages()) {
-                logger.info("Max pages ({}) reached — worker stopping", config.getMaxPages());
-                return;
             }
 
             activeWorkers.incrementAndGet();
             try {
-                processUrl(item, allowedHost, queue, politenessChecker);
+                processUrl(item, allowedHost, queue, politenessChecker, pageSlots);
             } finally {
                 activeWorkers.decrementAndGet();
             }
@@ -189,7 +190,8 @@ public class Crawler {
             UrlWithDepth item,
             String allowedHost,
             BlockingQueue<UrlWithDepth> queue,
-            PolitenessChecker politenessChecker) {
+            PolitenessChecker politenessChecker,
+            Semaphore pageSlots) {
 
         String url = item.url();
         int depth  = item.depth();
@@ -207,9 +209,18 @@ public class Crawler {
             return;
         }
 
+        // Max pages check — stop this worker if the global page cap is reached.
+        // pageCount is checked BEFORE incrementing so we don't overshoot by
+        // the number of concurrent workers.
+        if (config.hasMaxPages() && !pageSlots.tryAcquire()) {
+            logger.info("Max pages ({}) reached — worker stopping", config.getMaxPages());
+            return;
+        }
+
         Optional<Document> doc = fetcher.fetch(url);
         if (doc.isEmpty()) {
             logger.error("Failed to fetch: {}", url);
+            if (config.hasMaxPages()) pageSlots.release(); // Release the page slot since this fetch didn't succeed
             return;
         }
 
