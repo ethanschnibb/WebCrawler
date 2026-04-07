@@ -117,8 +117,8 @@ public class Crawler {
         //     pageSlots = new Semaphore(Integer.MAX_VALUE);
         // }
 
-        queue.add(new UrlWithDepth(normalisedStart, 0));
         visitedUrls.add(normalisedStart);
+        queue.add(new UrlWithDepth(normalisedStart, 0));
 
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         for (int i = 0; i < config.getConcurrency(); i++) {
