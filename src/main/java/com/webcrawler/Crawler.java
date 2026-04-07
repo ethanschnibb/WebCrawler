@@ -109,13 +109,13 @@ public class Crawler {
         BlockingQueue<UrlWithDepth> queue = new LinkedBlockingQueue<>();
         AtomicInteger activeWorkers = new AtomicInteger(0);
 
-        Semaphore pageSlots;
-        if (config.getMaxPages() > 0) {
-            pageSlots = new Semaphore(config.getMaxPages());
-        } else {
-            // If no max pages, use a semaphore with a large number of permits to avoid blocking
-            pageSlots = new Semaphore(Integer.MAX_VALUE);
-        }
+        Semaphore pageSlots = (config.hasMaxPages()) ? new Semaphore(config.getMaxPages()) : null;
+        // if (config.getMaxPages() > 0) {
+        //     pageSlots = new Semaphore(config.getMaxPages());
+        // } else {
+        //     // If no max pages, use a semaphore with a large number of permits to avoid blocking
+        //     pageSlots = new Semaphore(Integer.MAX_VALUE);
+        // }
 
         queue.add(new UrlWithDepth(normalisedStart, 0));
         visitedUrls.add(normalisedStart);
